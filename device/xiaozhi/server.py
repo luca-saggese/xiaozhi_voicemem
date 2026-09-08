@@ -120,23 +120,10 @@ class XiaozhiWebSocketServer:
         """
         clean_path = path.split("?")[0].rstrip("/")
         if clean_path == "/xiaozhi/ota":
-            host_header = request_headers.get("host")
-            host_part = host_header if host_header else f"{self.host}:{self.port}"
-            ws_url = f"ws://{host_part}{WEBSOCKET_PATH}"
-            response_data = {
-                "websocket": {
-                    "url": ws_url,
-                    "token": self._auth_token or "",
-                    "version": 1,
-                },
-                "server_time": {
-                    "timestamp": int(time.time() * 1000),
-                    "timezone_offset": 0,
-                },
-            }
+            status, response_data = self._bootstrap_response(request_headers, require_identity=False)
             body = json.dumps(response_data, separators=(",", ":")).encode("utf-8")
             return (
-                http.HTTPStatus.OK,
+                status,
                 Headers([
                     ("Content-Type", "application/json"),
                     ("Content-Length", str(len(body))),
@@ -149,11 +136,41 @@ class XiaozhiWebSocketServer:
         return None  # Prosegui con l'upgrade WebSocket
 
     async def _ota_http_handler(self, request: web.Request) -> web.Response:
-        host_header = request.headers.get("host", self.host)
+        status, response_data = self._bootstrap_response(
+            request.headers,
+            require_identity=request.method == "POST" and "activation-version" in request.headers,
+        )
+        return web.json_response(response_data, status=status.value)
+
+    def _bootstrap_response(
+        self,
+        request_headers: Any,
+        *,
+        require_identity: bool,
+    ) -> tuple[http.HTTPStatus, dict[str, Any]]:
+        """Restituisce solo la configurazione letta da ``ota.cc``.
+
+        Il firmware stock non manda Authorization durante il check OTA; se la
+        manda, la validiamo. Il token WebSocket viene invece consegnato nella
+        risposta e sarà usato nel successivo handshake.
+        """
+        device_id = request_headers.get("device-id", "")
+        client_id = request_headers.get("client-id", "")
+        if require_identity and (not device_id or not client_id):
+            return http.HTTPStatus.BAD_REQUEST, {"error": "Device-Id and Client-Id are required"}
+
+        authorization = request_headers.get("authorization", "")
+        if authorization and self._auth_token:
+            if not authorization.startswith("Bearer ") or authorization[7:] != self._auth_token:
+                return http.HTTPStatus.UNAUTHORIZED, {"error": "Invalid authorization token"}
+
+        host_header = request_headers.get("host", self.host)
         host_name = host_header.rsplit(":", 1)[0] if ":" in host_header else host_header
-        response_data = {
+        websocket_url = f"ws://{host_name}:{self.port}{WEBSOCKET_PATH}"
+        return http.HTTPStatus.OK, {
+            "firmware": {"version": "0.0.0", "url": ""},
             "websocket": {
-                "url": f"ws://{host_name}:{self.port}{WEBSOCKET_PATH}",
+                "url": websocket_url,
                 "token": self._auth_token or "",
                 "version": 1,
             },
@@ -162,7 +179,6 @@ class XiaozhiWebSocketServer:
                 "timezone_offset": 0,
             },
         }
-        return web.json_response(response_data)
 
     async def _handle_connection(self, websocket: WebSocketServerProtocol) -> None:
         """Gestisce una nuova connessione WebSocket."""

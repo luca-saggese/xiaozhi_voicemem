@@ -1,0 +1,8 @@
+{
+  "Activation-Version": "1",
+  "Device-Id": "AA:BB:CC:DD:EE:FF",
+  "Client-Id": "stock-client-uuid",
+  "User-Agent": "xiaozhi-stock-firmware",
+  "Accept-Language": "en-US",
+  "Content-Type": "application/json"
+}

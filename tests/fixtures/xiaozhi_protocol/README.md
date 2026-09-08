@@ -26,3 +26,4 @@ Tutte le fixture presenti in questa directory sono ricavate direttamente dal cod
 | `abort_wake_word.json` | `abort` con reason | `main/protocols/protocol.cc:42-49` (`SendAbortSpeaking`) | `main/xiaozhi-server/core/handle/abortHandle.py` | reason: "wake_word_detected" |
 | `mcp_initialize.json` | `mcp` JSON-RPC | `main/mcp_server.cc`, `docs/mcp-protocol.md` | `main/xiaozhi-server/core/handle/textHandler/mcpMessageHandler.py` | JSON-RPC 2.0 initialize envelope |
 | `ota_response.json` | OTA/version response | `main/ota.cc:140-220` (`CheckVersion`) | deployment-specific | Sezioni `websocket` e `server_time` parsate dal firmware; il path è `ota_url`, non un endpoint firmware fisso |
+| `ota_request_headers.json` | Header POST OTA stock | `main/ota.cc:54-68` (`SetupHttp`) | `main/xiaozhi-server/core/api/ota_handler.py:143-166` | I nomi e le semantiche sono upstream; gli identificativi sono valori sintetici di test |

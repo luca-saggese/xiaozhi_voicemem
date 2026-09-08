@@ -281,6 +281,8 @@ class DeviceConnection:
         self._bytes_received += len(data)
         try:
             frame = decode_frame(data, BinaryFramingVersion(self.protocol_version))
+            if frame.frame_type != 0:
+                raise MalformedFrame("binary frame type is not Opus audio")
         except (MalformedFrame, ValueError) as error:
             logger.warning("Malformed binary message: %s", error)
             await self._send_error("MALFORMED_BINARY", str(error))

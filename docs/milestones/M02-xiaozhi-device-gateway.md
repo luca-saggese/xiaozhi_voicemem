@@ -31,6 +31,13 @@ La parte server-side della milestone e implementata nel package `device/xiaozhi`
 
 La suite automatica e Ruff passano. Il type-check ristretto ai moduli M02 non segnala errori nei file del gateway; il type-check globale continua a riportare errori preesistenti nell’area `voicemem`, fuori dall’ambito di questa milestone.
 
+Validazione finale: 128 test passati. La coverage non è disponibile perché
+`pytest-cov` non è installato nell’ambiente corrente.
+
+Il bootstrap usa `ota_port=0` come default dinamico: il listener HTTP sceglie una
+porta effimera quando non viene configurata esplicitamente e la porta effettiva è
+esposta da `server.ota_port`.
+
 ## Deliverable della milestone
 
 Un device con firmware stock deve:
