@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xiaozhi-voicemem"
+version = "0.1.0"
+description = "Server standalone VoiceMem-first per device ESP32 Xiaozhi stock."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "luca-saggese" }]
+keywords = ["voicemem", "xiaozhi", "esp32", "memory", "voice", "agent"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Dipendenze runtime minime per M01.
+# VoiceMem usa import lazy (PEP 562): `import voicemem` e `VoiceMem(mode="text_mode")`
+# richiedono solo stdlib a import-time. Le dipendenze pesanti (torch, funasr,
+# sherpa-onnx, sentence-transformers, mem0ai, openai, ...) vengono caricate solo
+# al primo uso effettivo delle capability e saranno aggiunte nelle milestone
+# successive (M04+).
+dependencies = [
+    "numpy",
+]
+
+[project.optional-dependencies]
+# Dipendenze per lo sviluppo (test, lint, format, type check).
+dev = [
+    "pytest>=7",
+    "ruff>=0.4",
+    "mypy>=1.8",
+]
+
+[project.scripts]
+xiaozhi-voicemem = "runtime.server:main"
+
+[tool.setuptools.packages.find]
+include = ["voicemem*", "device*", "runtime*"]
+
+[tool.setuptools.package-data]
+voicemem = ["assets/*.wav", "leftbrain/data/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true

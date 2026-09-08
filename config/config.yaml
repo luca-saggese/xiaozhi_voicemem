@@ -1,0 +1,46 @@
+# Configurazione di esempio per xiaozhi_voicemem.
+# In M01 la configurazione è costruita con i default di dataclass (runtime/config.py)
+# e può essere sovrascritta via variabili d'ambiente (prefisso XIAOZHI_VOICEMEM_).
+# Il parsing di questo file YAML verrà completato quando la configurazione
+# diventerà necessaria (M02+).
+
+server:
+  host: "0.0.0.0"
+  port: 8765
+  handshake_timeout_s: 10.0
+
+logging:
+  level: "INFO"
+  format: "json"
+  include_context: true
+
+voicemem:
+  mode: "text_mode"
+  memory_language: "it"
+  user_id: "voice_user"
+  top_k: 5
+
+storage:
+  memory_root: "voicemem_memoryspace"
+  schema_version: 1
+
+device_gateway:
+  websocket_path: "/xiaozhi"
+  keepalive_s: 30.0
+  reconnect_s: 5.0
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  codec: "opus"
+  frame_duration_ms: 60
+
+language:
+  memory_language: "it"
+  asr_language: "it"
+  tts_language: "it"
+
+features:
+  health_check: true
+  enable_websocket: false
+  enable_audio_bridge: false
