@@ -72,6 +72,49 @@ per tutto il ciclo di sviluppo.
 
 ---
 
+## xiaozhi-esp32 (firmware)
+
+| Campo | Valore |
+|---|---|
+| Repository URL | `https://github.com/78/xiaozhi-esp32.git` |
+| Branch acquisito | `main` |
+| Commit SHA (HEAD) | `c7241272f2d5fd140c77542f3cf12d09e717fc2f` |
+| Tag / versione | `v2.4.2-23-gc724127` (describe) |
+| Data acquisizione | 2026-09-08 |
+| Licenza | MIT License (file `LICENSE` presente nel repository) |
+| Stato working tree | pulito (nessuna modifica locale) |
+
+### Ruolo nel nuovo progetto
+
+- **Sorgente di verità lato firmware/device** per il protocollo.
+- Usato esclusivamente come **riferimento** per:
+  - WebSocket handshake e headers;
+  - formato messaggi JSON (hello, listen, abort, mcp, iot, ...);
+  - binary protocol versions (Opus framing);
+  - state machine (DeviceState enum e transizioni);
+  - MCP tool registry e JSON-RPC envelope;
+  - OTA/bootstrap endpoint e formato;
+  - MQTT+UDP hybrid protocol.
+- **NON** verrà modificato.
+- **Nessun codice firmware** entrerà nel nuovo progetto salvo eventuali
+  costanti/schema strettamente necessari e correttamente attribuiti.
+
+---
+
+## Regola delle fonti (protocollo)
+
+Per ogni comportamento del protocollo, l'ordine di autorità è:
+
+1. **Codice firmware** `_upstream/xiaozhi-esp32` — sorgente di verità.
+2. **Codice server** `_upstream/xiaozhi-esp32-server` — implementazione di
+   riferimento lato server.
+3. **Documentazione** contenuta nei due repository.
+
+Se firmware e server divergono, la divergenza viene documentata e il firmware
+stock è considerato il requisito da soddisfare.
+
+---
+
 ## Vincoli di riuso
 
 - VoiceMem è il core: nessuna compatibilità obbligatoria con gli upstream.
