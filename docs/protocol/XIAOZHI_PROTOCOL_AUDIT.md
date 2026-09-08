@@ -73,7 +73,13 @@ Il firmware sceglie WebSocket o MQTT in base alla configurazione ricevuta via OT
 
 ### 2.2 Protocol versions
 
-Il firmware supporta versioni multiple del protocollo binario, selezionate dal campo `version` nelle impostazioni:
+Il firmware espone tre concetti distinti:
+
+- **WebSocket header `Protocol-Version`**: valore di `websocket.version`, inviato durante `OpenAudioChannel()`.
+- **Binary framing version**: lo stesso `version_` seleziona il formato audio: v1 raw Opus, v2 `BinaryProtocol2`, v3 `BinaryProtocol3`.
+- **JSON `hello.version`**: il firmware copia `version_` nel proprio hello. Il parser del server hello non legge questo campo; legge `transport`, `session_id` e i parametri audio.
+
+Nella build corrente i tre valori normalmente coincidono perché derivano da `version_`, ma rappresentano contratti diversi: header/negoziazione, framing dei binary frame e campo JSON. Il server non deve chiamare tutti e tre semplicemente “versione del protocollo”.
 
 - **Version 1** (default): Raw Opus frames, nessun metadata aggiuntivo.
 - **Version 2**: Header strutturato `BinaryProtocol2` (`protocol.h:17-24`):
@@ -160,7 +166,7 @@ Il firmware supporta versioni multiple del protocollo binario, selezionate dal c
 }
 ```
 
-**Divergenza firmware/server**: Il server (`connection.py:146-147`) non include `transport` nel welcome message. Il firmware valuta `transport == "websocket"` — se manca, logga errore ma non blocca la connessione.
+Il firmware legge realmente `transport` e richiede `"websocket"`; legge `session_id` se stringa e usa solo `audio_params.sample_rate` e `audio_params.frame_duration` se numerici. Non legge `audio_params.format`, `channels` o un `version` nella risposta server.
 
 ### 3.3 Timeout hello
 
@@ -333,6 +339,19 @@ MCP è annunciato dal device via `features.mcp: true` nel messaggio `hello`.
 }
 ```
 
+Il parser firmware accetta come input solo request JSON-RPC 2.0: `jsonrpc` deve
+essere `"2.0"`, `method` deve essere stringa, `params` se presente deve essere
+un oggetto e `id` deve essere numerico. Le response con `result` o `error` non
+sono parseate come input da `McpServer::ParseMessage()`.
+
+Distinguere quindi:
+
+- request: `jsonrpc`, `method`, `id` e `params` opzionale;
+- response: `jsonrpc`, `id` e `result` oppure `error`; envelope standard, ma non
+  consumato dal parser MCP firmware come request;
+- notification: `jsonrpc`, `method`, `params` opzionale, senza `id`. Il firmware
+  corrente le ignora solo quando il metodo inizia con `notifications`.
+
 ### 8.3 Metodi JSON-RPC
 
 | Metodo | Direction | Descrizione |
@@ -387,33 +406,59 @@ Il server (`iotMessageHandler.py:12-16`) gestisce `descriptors` e `states`.
 
 ### 10.1 Endpoint
 
-Il firmware chiama un endpoint HTTP per ottenere configurazione e URL WebSocket/MQTT.
+Il firmware non definisce un path fisso `/xiaozhi/ota/`: usa `wifi.ota_url`, con
+fallback a `CONFIG_OTA_URL`.
 
 **Server**: `ota_handler.py` — endpoint HTTP via `aiohttp`.
 
 ### 10.2 Request
 
-Il firmware invia una richiesta HTTP con:
-- `Device-Id` (MAC address)
-- `Client-Id` (UUID)
-- `Authorization` (token)
+`CheckVersion()` usa `POST` se `GetSystemInfoJson()` non è vuoto, altrimenti
+`GET`, verso `ota_url`. Gli header sono `Activation-Version` (`1` senza seriale
+efuse, `2` con seriale), `Device-Id`, `Client-Id`, `User-Agent`,
+`Accept-Language`, `Content-Type: application/json`; con seriale aggiunge
+`Serial-Number`. Se la risposta contiene una challenge, `Activate()` invia poi
+`POST` a `ota_url + "/activate"` con `algorithm`, `serial_number`, `challenge`
+e `hmac`.
 
 ### 10.3 Response
 
-Il server OTA restituisce:
-- URL WebSocket o configurazione MQTT
-- Eventuale URL firmware update
-- Token/auth
+La risposta è un oggetto con sezioni opzionali:
+
+```json
+{
+  "websocket": {"url": "ws://host/xiaozhi/v1/", "token": "", "version": 1},
+  "mqtt": {"endpoint": "host:8883", "client_id": "...", "username": "...", "password": "...", "keepalive": 240, "publish_topic": "..."},
+  "activation": {"message": "...", "code": "...", "challenge": "...", "timeout_ms": 30000},
+  "server_time": {"timestamp": 1788888000000, "timezone_offset": 0},
+  "firmware": {"version": "1.0.0", "url": "https://host/fw.bin", "force": 0}
+}
+```
+
+Il firmware copia proprietà stringa/numeriche di `websocket` e poi consuma
+realmente `url`, `token` e `version`; per MQTT usa `endpoint`, `client_id`,
+`username`, `password`, `keepalive` e `publish_topic`. `server_time.timestamp`
+è millisecondi Unix. `firmware.version` e `firmware.url` devono essere entrambi
+stringhe per valutare un aggiornamento; `force` è opzionale. `activation` è
+opzionale e `challenge` abilita il POST `/activate`.
 
 ### 10.4 Campi obbligatori
 
-Per poter usare il nostro server senza modificare firmware, il server OTA deve restituire almeno:
-- `ws_url` o configurazione MQTT completa
-- `token` valido
+Per un firmware stock configurato WebSocket basta una sezione `websocket` con
+`url`; `version` determina header, framing e `hello.version`, mentre `token` è
+necessario solo se il server richiede auth. `server_time`, `mqtt`, `activation`
+e `firmware` non sono necessari per aprire la sessione WebSocket. Il codice
+firmware non prova l’esistenza universale di `/xiaozhi/ota/`: questo è una
+convenzione possibile del deployment, non un path imposto dal client.
 
 ---
 
 ## 11. Altri messaggi
+
+Il firmware stock corrente gestisce direttamente `tts`, `stt`, `llm`, `mcp`,
+`system`, `alert` e, solo con `CONFIG_RECEIVE_CUSTOM_MESSAGE`, `custom`. Per
+`system` l'unico comando consumato è `reboot`; `upgrade` non è un valore
+supportato dal dispatch osservato.
 
 ### 11.1 `type: "ping"` / `type: "pong"`
 
@@ -459,6 +504,13 @@ Attivato solo se `enable_websocket_ping == true` nel server.
 ### 11.6 `type: "custom"` (opzionale)
 
 Attivato da `CONFIG_RECEIVE_CUSTOM_MESSAGE` nel firmware.
+
+### 11.7 Server legacy / non richiesto dal firmware stock
+
+Non è stato identificato un handler firmware per `type: "server"`; le varianti
+`action`, `content`, `status` e `message` del server originale non sono quindi
+requisiti del compatibility gateway. Anche `notify` è un tipo distinto, con
+`audio_url` e sottotitoli, e non va confuso con `server`.
 
 ---
 
@@ -510,11 +562,13 @@ Attivato da `CONFIG_RECEIVE_CUSTOM_MESSAGE` nel firmware.
 
 ---
 
-## 14. Parti non ancora determinate
+## 14. Unknown rimasti
 
-1. **Formato esatto della risposta OTA/bootstrap** — non completamente verificato nel firmware.
-2. **Schema esatto dei descriptors IoT** — non completamente documentato.
-3. **Formato `text_font` capabilities** — dipende da `Assets::GetInstance().text_font_capability()`.
-4. **Versione esatta del protocollo binario usata dal firmware stock** — dipende da configurazione.
-5. **Comportamento esatto su reconnect con sessione precedente** — non completamente tracciato.
+1. Il path pubblico dell'endpoint OTA dipende da `ota_url`; il firmware non ne
+  impone uno universale.
+2. Lo schema completo dei `descriptors` IoT non è definito dal parser firmware
+  analizzato.
+3. Il contenuto `text_font` dipende da `Assets::GetInstance().text_font_capability()`.
+4. La versione/framing effettiva del singolo device dipende da
+  `websocket.version`.
 6. **Formato messaggi `custom`** — implementazione-specifico.

@@ -1,6 +1,8 @@
-# Xiaozhi State Machine — Stati e transizioni del firmware ESP32 stock
+# Xiaozhi State Machine — DeviceStateMachine firmware e modello server-side
 
-> Derivata dal codice firmware `_upstream/xiaozhi-esp32`. Non usare una state machine inventata.
+> La prima sezione è derivata dal codice firmware `_upstream/xiaozhi-esp32`.
+> La sezione WebSocket server-side è invece un modello introdotto dal nostro
+> gateway e non un enum firmware.
 
 Fonte: `main/device_state.h` (enum `DeviceState`) e `main/device_state_machine.cc` (`IsValidTransition`).
 
@@ -83,7 +85,7 @@ stateDiagram-v2
 | `WifiConfiguring` | `Activating` | WiFi connesso | interno | — | `device_state_machine.cc` | 51 |
 | `WifiConfiguring` | `AudioTesting` | Test audio | interno | — | `device_state_machine.cc` | 52 |
 | `AudioTesting` | `WifiConfiguring` | Test completato | interno | — | `device_state_machine.cc` | 55 |
-| `Activating` | `Upgrading` | OTA disponibile | server → device | `{"type":"system","command":"upgrade"}` | `device_state_machine.cc` | 59 |
+| `Activating` | `Upgrading` | OTA disponibile | interno | — | `device_state_machine.cc` | 59 |
 | `Activating` | `Idle` | Attivazione completata | interno | — | `device_state_machine.cc` | 60 |
 | `Activating` | `WifiConfiguring` | Errore attivazione | interno | — | `device_state_machine.cc` | 61 |
 | `Upgrading` | `Idle` | Upgrade fallito/completato | interno | — | `device_state_machine.cc` | 65 |
@@ -93,7 +95,7 @@ stateDiagram-v2
 | `Idle` | `Speaking` | Notifica | server → device | `{"type":"tts","state":"start"}` | `device_state_machine.cc` | 73 |
 | `Idle` | `Notifying` | Notifica locale | interno | — | `device_state_machine.cc` | 74 |
 | `Idle` | `Activating` | Riactivation | interno | — | `device_state_machine.cc` | 75 |
-| `Idle` | `Upgrading` | OTA | server → device | `{"type":"system","command":"upgrade"}` | `device_state_machine.cc` | 76 |
+| `Idle` | `Upgrading` | OTA | interno | — | `device_state_machine.cc` | 76 |
 | `Idle` | `WifiConfiguring` | Network lost | interno | — | `device_state_machine.cc` | 77 |
 | `Connecting` | `Idle` | Connessione fallita | interno | — | `device_state_machine.cc` | 81 |
 | `Connecting` | `Listening` | Connessione OK + hello | server → device | `{"type":"hello",...}` | `device_state_machine.cc` | 82 |
@@ -128,9 +130,12 @@ Definiti in `main/application.h:20-33`:
 
 ---
 
-## Stati protocollo (WebSocket session)
+## Server-side derived WebSocket session state machine
 
-Oltre agli stati device, il protocollo WebSocket ha una sua macchina a stati interna:
+Questa non è una enum o una state machine presente nel firmware. È un modello
+che introdurremo noi lato server, derivato dal lifecycle osservabile di
+`OpenAudioChannel()`, handshake, hello e chiusura. Va mantenuto separato dalla
+vera `DeviceStateMachine` descritta sopra.
 
 | Stato | Descrizione |
 |---|---|
@@ -141,8 +146,8 @@ Oltre agli stati device, il protocollo WebSocket ha una sua macchina a stati int
 | `CLOSED` | Sessione terminata |
 
 Transizioni:
-- `DISCONNECTED → CONNECTING`: chiamata `OpenAudioChannel()`
+- `DISCONNECTED → CONNECTING`: chiamata firmware `OpenAudioChannel()`
 - `CONNECTING → CONNECTED`: WebSocket handshake OK
-- `CONNECTED → HELLO_DONE`: Hello ricevuto (firmware `ParseServerHello`)
+- `CONNECTED → HELLO_DONE`: risposta hello ricevuta e accettata da `ParseServerHello`
 - `HELLO_DONE → CLOSED`: `CloseAudioChannel()` o disconnect
 - Qualsiasi stato → `DISCONNECTED`: disconnect/errore

@@ -9,22 +9,23 @@
 
 | # | Message `type` | Direction | Transport | Required fields | Optional fields | Firmware handler | Server handler | Notes |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `hello` | device → server | WS text, MQTT | `type`, `version`, `transport`, `audio_params{format,sample_rate,channels,frame_duration}`, `features{mcp}` | `features{aec,glyph_push}`, `text_font{bundle,charset,size,bpp}` | `websocket_protocol.cc:196` | `helloHandle.py:28` | Primo messaggio dopo connessione |
-| 2 | `hello` | server → device | WS text, MQTT | `type`, `transport` | `session_id`, `audio_params{format,sample_rate,frame_duration}`, `udp{server,port,key,nonce}` | `websocket_protocol.cc:226` | `connection.py:146` | Timeout 10s firmware |
+| 1 | `hello` | device → server | WS text, MQTT | Firmware emette `type`, `version`, `features`, `transport`, `audio_params` | `features.aec`, `features.glyph_push`, `text_font` dipendono dalla build | `websocket_protocol.cc:198-216` | `helloHandle.py` | Un solo type; bidirezionale. `version` è il valore configurato del framing/header. |
+| 2 | `hello` | server → device | WS text, MQTT | Per il parser firmware: `type`, `transport="websocket"` | `session_id`, `audio_params`, `udp` | `websocket_protocol.cc:224-249` | `connection.py` | Il firmware legge solo `transport`, `session_id`, `audio_params.sample_rate` e `frame_duration`; per il gateway `session_id` è necessario per le richieste successive. |
 | 3 | `listen` | device → server | WS text, MQTT | `session_id`, `type`, `state` | `mode` ("auto"\|"manual"\|"realtime"), `text` (solo state=detect) | `protocol.cc:52` | `listenMessageHandler.py:17` | Tre modalità di ascolto |
 | 4 | `abort` | device → server | WS text, MQTT | `session_id`, `type` | `reason` ("wake_word_detected") | `protocol.cc:42` | `abortHandle.py:8` | Cancella TTS in corso |
 | 5 | `stt` | server → device | WS text, MQTT | `session_id`, `type`, `text` | — | — | `sendAudioHandle.py` | Trascrizione ASR |
 | 6 | `tts` | server → device | WS text, MQTT | `session_id`, `type`, `state` | `text` (solo sentence_start) | — | `sendAudioHandle.py` | Start/stop/sentence TTS |
 | 7 | `llm` | server → device | WS text, MQTT | `session_id`, `type` | `emotion`, `text` | — | `sendAudioHandle.py` | Stato LLM/emotion |
-| 8 | `mcp` | bidirezionale | WS text, MQTT | `session_id`, `type`, `payload{jsonrpc,method,id}` | `payload{params,result,error}` | `mcp_server.cc` | `mcpMessageHandler.py:10` | JSON-RPC 2.0 envelope |
+| 8 | `mcp` | bidirezionale | WS text, MQTT | Request: `payload{jsonrpc:"2.0",method,id}` e `params` opzionale | Response: `payload{jsonrpc,id,result|error}`; notification: `payload{jsonrpc,method,params?}` senza `id` | `mcp_server.cc:350-433` | `mcpMessageHandler.py` | Il parser firmware accetta request con id numerico; ignora method che inizia con `notifications`; non parsea response come request. |
 | 9 | `iot` | device → server | WS text | `session_id`, `type` | `descriptors[]`, `states[]` | — | `iotMessageHandler.py:12` | Capability IoT |
 | 10 | `ping` | device → server | WS text | `type` | — | — | `pingMessageHandler.py:17` | Solo se `enable_websocket_ping` |
 | 11 | `pong` | server → device | WS text | `type`, `timestamp` | — | — | `pingMessageHandler.py:17` | Risposta a ping |
-| 12 | `server` | server → device | WS text | `type`, `action` | `content{secret}`, `status`, `message` | — | `serverMessageHandler.py:12` | Update config/restart |
+| 12 | `server` | server → device | WS text | — | — | nessun handler firmware identificato | server legacy | Non requisito del compatibility gateway stock. |
 | 13 | `system` | server → device | WS text, MQTT | `type`, `command` | — | — | — | Comando "reboot" |
 | 14 | `alert` | server → device | WS text, MQTT | `type` | `status`, `message`, `emotion` | — | — | Notifica alert |
 | 15 | `goodbye` | bidirezionale | MQTT | `session_id`, `type` | — | `mqtt_protocol.cc:241` | — | Solo MQTT |
-| 16 | `custom` | server → device | WS text, MQTT | `type` | (implementation-specific) | `CONFIG_RECEIVE_CUSTOM_MESSAGE` | — | Opzionale |
+| 16 | `custom` | server → device | WS text, MQTT | `type`, `payload` object, solo con `CONFIG_RECEIVE_CUSTOM_MESSAGE` | — | `application.cc:693-705` | — | Opzionale e build-dependent |
+| 17 | `notify` | server → device | WS text | `type`, `audio_url` | `subtitles[]` | `application.cc:574-606` | server notification handler | Notifica audio distinta da `server`. |
 
 ---
 
@@ -115,7 +116,7 @@
 {"session_id":"xxx","type":"llm","emotion":"happy","text":"Ciao! Sono qui per aiutarti."}
 ```
 
-### 8. `mcp` (bidirezionale)
+### 8. `mcp` (request, response, notification)
 
 ```json
 {
@@ -129,6 +130,23 @@
   }
 }
 ```
+
+Response:
+
+```json
+{"session_id":"xxx","type":"mcp","payload":{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}}
+```
+
+Notification, senza `id`:
+
+```json
+{"session_id":"xxx","type":"mcp","payload":{"jsonrpc":"2.0","method":"notifications/state_changed","params":{}}}
+```
+
+Il firmware stock corrente accetta request con `jsonrpc="2.0"`, `method` stringa,
+`id` numerico e `params` oggetto opzionale. Ignora i metodi che iniziano con
+`notifications`; non richiede `method` nelle response e non richiede `id` nelle
+notification come regola generale JSON-RPC.
 
 ### 9. `iot` (device → server)
 
@@ -151,14 +169,14 @@
 // device → server
 {"type":"ping"}
 // server → device
-{"type":"pong","timestamp":"2026-09-08T12:00:00Z"}
+{"type":"pong","timestamp":1788888000000}
 ```
 
-### 11. `server` (server → device)
+### 11. `server` (server legacy, non richiesto)
 
 ```json
-{"type":"server","action":"update_config","content":{"secret":"..."},"status":"ok","message":"Config updated"}
-{"type":"server","action":"restart"}
+Non esiste un handler firmware stock corrente per questo type; gli esempi del
+server originale non sono requisiti del compatibility gateway.
 ```
 
 ### 12. `system` (server → device)
@@ -166,6 +184,9 @@
 ```json
 {"type":"system","command":"reboot"}
 ```
+
+`reboot` è l'unico comando consumato dal firmware. `upgrade` non è supportato
+dal dispatch firmware e non va documentato come valore valido.
 
 ### 13. `alert` (server → device)
 
@@ -183,8 +204,11 @@
 
 ## Summary
 
-- **Total message types**: 16
-- **Device → Server**: hello, listen, abort, iot, ping, goodbye, mcp
-- **Server → Device**: hello, stt, tts, llm, pong, server, system, alert, goodbye, custom, mcp
-- **Bidirezionale**: mcp, goodbye
-- **Transport**: WebSocket text (tutti), MQTT (hello, listen, abort, stt, tts, llm, mcp, system, alert, goodbye, custom), WebSocket binary (audio)
+- **Total unique JSON `type` values**: 16 (`hello` è contato una sola volta)
+- **Device → Server**: hello, listen, abort, iot, ping, mcp
+- **Server → Device**: hello, stt, tts, llm, pong, notify, system, alert, custom
+- **MQTT lifecycle**: goodbye
+- **Bidirezionale**: mcp
+- **Server legacy / non richiesto**: server
+- **Transport**: WebSocket text per i messaggi applicativi; MQTT per i messaggi
+  supportati dalla configurazione MQTT; WebSocket binary per audio.

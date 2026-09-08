@@ -13,6 +13,24 @@
 
 Implementare lato server il contratto richiesto da un ESP32 Xiaozhi stock, senza introdurre alcuna logica AI.
 
+## Stato di implementazione
+
+La parte server-side della milestone e implementata nel package `device/xiaozhi`:
+
+- endpoint WebSocket stock-compatible su `/xiaozhi/v1/` con validazione degli headers;
+- parser e serializer tipizzati per hello, listen, abort, MCP, IoT, keepalive ed errori;
+- negoziazione hello con `session_id` e parametri audio server-side;
+- state machine di sessione, timeout hello/idle e cleanup completo;
+- ricezione dei frame audio binari come bytes raw, senza decodifica o pipeline AI;
+- eventi e comandi interni separati dalla logica applicativa;
+- policy di sostituzione della connessione precedente per lo stesso device;
+- bootstrap OTA su `/xiaozhi/ota/`: il `POST` firmware-compatible è servito da un
+	listener HTTP separato (`ota_port`, porta effimera se non configurata), mentre
+	il `GET` sul listener WebSocket è mantenuto per compatibilità diagnostica;
+- fixture di protocollo e test WebSocket reali, inclusi reconnect, timeout e chiusure durante listen.
+
+La suite automatica e Ruff passano. Il type-check ristretto ai moduli M02 non segnala errori nei file del gateway; il type-check globale continua a riportare errori preesistenti nell’area `voicemem`, fuori dall’ambito di questa milestone.
+
 ## Deliverable della milestone
 
 Un device con firmware stock deve:
@@ -182,23 +200,29 @@ Se il firmware target usa un endpoint bootstrap/OTA per ottenere URL server o co
 
 ### Gate M2-A — Device stock connect
 
-Un ESP32 non modificato completa connessione e hello.
+**PENDING HARDWARE.** Un ESP32 non modificato deve ancora completare connessione e hello in una prova con hardware reale. I test automatici coprono lo stesso contratto tramite client WebSocket e fixture.
 
 ### Gate M2-B — Protocol fidelity
 
-Messaggi server osservati devono rispettare schema e sequenza attesa dal firmware.
+**PASS SOFTWARE.** Parser, serializer, headers, sequenza hello, timeout, keepalive,
+errori, framing binario e bootstrap OTA sono coperti da fixture e test di
+integrazione WebSocket. Il `POST /xiaozhi/ota/` è verificato sul listener HTTP
+separato e restituisce URL WebSocket e `server_time.timestamp` in millisecondi.
+La conferma finale con messaggi osservati dal firmware resta parte di M2-A.
 
 ### Gate M2-C — Nessuna logica AI nel gateway
 
-Code review obbligatoria: nessun import da moduli ASR/LLM/memory/TTS.
+**PASS.** Il package `device/xiaozhi` non importa `voicemem` o moduli AI; i test runtime e il controllo AST verificano il boundary. Il gateway emette eventi astratti e non implementa ASR, VAD, LLM, memory o TTS.
 
 ## Criteri di uscita
 
-- handshake reale con ESP32 stock riuscito;
+- handshake reale con ESP32 stock riuscito (pendente prova hardware);
 - state machine testata;
 - reconnect stabile;
 - eventi/command interni definiti;
-- eventuale bootstrap necessario operativo.
+- bootstrap OTA operativo; in deployment il device deve raggiungere la porta
+	`ota_port` oltre alla porta WebSocket `port` (oppure usare un reverse proxy
+	che esponga il percorso HTTP previsto).
 
 ## Diagnostica
 

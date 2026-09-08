@@ -10,31 +10,19 @@ certezza dal codice firmware (`_upstream/xiaozhi-esp32`) e server
 - **Non** creare payload inventati.
 - Se un payload non può essere ricavato con certezza, non va inserito.
 
-## Fixture attuali
+## Fixture validate e provenienza esatta
 
-*(nessuna fixture ancora inserita — in attesa di M02 per estrarre payload reali
-da test o tracce)*
+Tutte le fixture presenti in questa directory sono ricavate direttamente dal codice sorgente upstream.
 
-## Provenienze disponibili per estrazione futura
-
-| Messaggio | Fonte firmware | Fonte server | Stato |
-|---|---|---|---|
-| `hello` device → server | `websocket_protocol.cc:196-217` | `helloHandle.py:28-44` | Documentato in `XIAOZHI_MESSAGE_CATALOG.md` |
-| `hello` server → device | `websocket_protocol.cc:226-249` | `connection.py:146-147` | Documentato |
-| `listen` start/stop/detect | `protocol.cc:52-70` | `listenMessageHandler.py:17-72` | Documentato |
-| `abort` | `protocol.cc:42-49` | `abortHandle.py:8-17` | Documentato |
-| `mcp` initialize | `mcp_server.cc` | `mcpMessageHandler.py:10-14` | Documentato |
-| `mcp` tools/list | `mcp_server.cc` | — | Documentato |
-| `mcp` tools/call | `mcp_server.cc` | — | Documentato |
-| `iot` descriptors/states | — | `iotMessageHandler.py:12-16` | Schema non completamente verificato |
-| `ping` / `pong` | — | `pingMessageHandler.py:17-38` | Documentato |
-| `server` update_config | — | `serverMessageHandler.py:12-72` | Documentato |
-| `goodbye` | `mqtt_protocol.cc:241-252` | — | Documentato |
-
-## Estrazione futura
-
-In M02, durante l'implementazione del gateway, queste fixture verranno popolate
-con payload reali catturati da:
-1. Test unitari del server originale
-2. Log di connessione con device reale
-3. Payload generati dal nostro stesso gateway in fase di test
+| File fixture | Tipo messaggio | Fonte firmware | Fonte server | Note |
+|---|---|---|---|---|
+| `hello_device_v1.json` | `hello` (device → server) | `main/protocols/websocket_protocol.cc:196-217` (`GetHelloMessage`) | `main/xiaozhi-server/core/handle/helloHandle.py:28` | Include features (mcp, aec, glyph_push) e audio_params |
+| `hello_server_v1.json` | `hello` (server → device) | `main/protocols/websocket_protocol.cc:226-249` (`ParseServerHello`) | `main/xiaozhi-server/core/connection.py:146` | Contiene transport ("websocket"), session_id, audio_params |
+| `listen_start_manual.json` | `listen` start manual | `main/protocols/protocol.cc:52-60` (`SendStartListening`) | `main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py` | mode: "manual" |
+| `listen_start_auto.json` | `listen` start auto | `main/protocols/protocol.cc:52-60` (`SendStartListening`) | `main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py` | mode: "auto" |
+| `listen_stop.json` | `listen` stop | `main/protocols/protocol.cc:62-65` (`SendStopListening`) | `main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py` | state: "stop" |
+| `listen_detect.json` | `listen` wake word | `main/protocols/protocol.cc:67-70` (`SendWakeWordDetected`) | `main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py` | state: "detect", text: wake_word |
+| `abort_simple.json` | `abort` base | `main/protocols/protocol.cc:42-49` (`SendAbortSpeaking`) | `main/xiaozhi-server/core/handle/abortHandle.py` | Senza reason |
+| `abort_wake_word.json` | `abort` con reason | `main/protocols/protocol.cc:42-49` (`SendAbortSpeaking`) | `main/xiaozhi-server/core/handle/abortHandle.py` | reason: "wake_word_detected" |
+| `mcp_initialize.json` | `mcp` JSON-RPC | `main/mcp_server.cc`, `docs/mcp-protocol.md` | `main/xiaozhi-server/core/handle/textHandler/mcpMessageHandler.py` | JSON-RPC 2.0 initialize envelope |
+| `ota_response.json` | OTA/version response | `main/ota.cc:140-220` (`CheckVersion`) | deployment-specific | Sezioni `websocket` e `server_time` parsate dal firmware; il path è `ota_url`, non un endpoint firmware fisso |
