@@ -26,11 +26,14 @@ MSG_SERVER = "server"
 MSG_SYSTEM = "system"
 MSG_ALERT = "alert"
 MSG_GOODBYE = "goodbye"
+MSG_NOTIFY = "notify"
+MSG_CUSTOM = "custom"
 
 # Tutti i type conosciuti (per validazione)
 KNOWN_TYPES = frozenset({
     MSG_HELLO, MSG_LISTEN, MSG_ABORT, MSG_STT, MSG_TTS, MSG_LLM, MSG_MCP, MSG_IOT,
     MSG_PING, MSG_PONG, MSG_SERVER, MSG_SYSTEM, MSG_ALERT, MSG_GOODBYE,
+    MSG_NOTIFY, MSG_CUSTOM,
 })
 
 
@@ -156,7 +159,7 @@ class Ping:
 class Pong:
     """Messaggio pong dal server."""
     type: str = MSG_PONG
-    timestamp: str = ""
+    timestamp: int | float | str = ""
 
 
 @dataclass(frozen=True)
@@ -190,6 +193,26 @@ class Goodbye:
     """Messaggio goodbye (MQTT only)."""
     session_id: str
     type: str = MSG_GOODBYE
+
+
+@dataclass(frozen=True)
+class NotifyMessage:
+    """Notifica audio server-side gestita dal firmware stock."""
+
+    audio_url: str
+    type: str = MSG_NOTIFY
+    subtitles: list[dict[str, Any]] | None = None
+
+
+# Nomi espliciti del contratto protocollo; gli alias mantengono compatibilità
+# con gli handler M02 già esistenti che usano i nomi brevi.
+ListenMessage = Listen
+AbortMessage = Abort
+STTMessage = STT
+TTSMessage = TTS
+LLMMessage = LLM
+PingMessage = Ping
+PongMessage = Pong
 
 
 # ── Eventi interni (device → runtime) ───────────────────────────────────────

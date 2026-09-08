@@ -10,24 +10,42 @@ Vincolo architetturale non negoziabile:
 
 from __future__ import annotations
 
+from device.xiaozhi.codec import BinaryFrame, BinaryFramingVersion, decode_frame, encode_frame
+from device.xiaozhi.commands import (
+  SendHello,
+  SendIoT,
+  SendLLMState,
+  SendMCP,
+  SendPong,
+  SendTranscript,
+  SendTTSSentence,
+  SendTTSStart,
+  SendTTSStop,
+)
 from device.xiaozhi.connection import DeviceConnection
 from device.xiaozhi.errors import (
-    AuthenticationError,
-    HelloTimeout,
-    InvalidStateTransition,
-    MalformedMessage,
-    ProtocolError,
-    ProtocolVersionError,
-    UnknownMessageType,
+  AuthenticationError,
+  HelloTimeout,
+  InvalidStateTransition,
+  MalformedMessage,
+  ProtocolError,
+  ProtocolVersionError,
+  SessionIdMismatch,
+  UnknownMessageType,
 )
 from device.xiaozhi.protocol import get_message_type, parse_message
 from device.xiaozhi.server import XiaozhiWebSocketServer
-from device.xiaozhi.state import DeviceProtocolState, SessionState
+from device.xiaozhi.state import DeviceProtocolState, ProtocolSession, SessionState
 
 __all__ = [
     "__version__",
     "XiaozhiWebSocketServer",
     "DeviceConnection",
+    "ProtocolSession",
+    "BinaryFrame",
+    "BinaryFramingVersion",
+    "encode_frame",
+    "decode_frame",
     "parse_message",
     "get_message_type",
     "SessionState",
@@ -39,6 +57,16 @@ __all__ = [
     "HelloTimeout",
     "AuthenticationError",
     "ProtocolVersionError",
+    "SessionIdMismatch",
+    "SendHello",
+    "SendTranscript",
+    "SendTTSStart",
+    "SendTTSSentence",
+    "SendTTSStop",
+    "SendLLMState",
+    "SendMCP",
+    "SendIoT",
+    "SendPong",
 ]
 
 __version__ = "0.2.0"

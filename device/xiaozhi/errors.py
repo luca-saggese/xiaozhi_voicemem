@@ -85,3 +85,14 @@ class ProtocolVersionError(ProtocolError):
             code="PROTOCOL_VERSION_ERROR",
             recoverable=False,
         )
+
+
+class SessionIdMismatch(ProtocolError):
+    """Il messaggio appartiene a una sessione diversa."""
+
+    def __init__(self, expected: str, actual: str):
+        super().__init__(
+            f"Session id mismatch: expected {expected!r}, got {actual!r}",
+            code="SESSION_ID_MISMATCH",
+            recoverable=True,
+        )

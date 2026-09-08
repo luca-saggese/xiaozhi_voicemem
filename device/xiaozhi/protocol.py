@@ -23,8 +23,14 @@ from device.xiaozhi.messages import (
     AudioParams,
     Features,
     HelloDevice,
+    HelloServer,
     Listen,
+    LLMMessage,
+    PingMessage,
+    PongMessage,
+    STTMessage,
     TextFont,
+    TTSMessage,
 )
 
 
@@ -87,6 +93,11 @@ def _required_bool(payload: dict[str, Any], field: str, message_type: str) -> bo
     return value
 
 
+def _expect_type(payload: dict[str, Any], expected: str) -> None:
+    if payload.get("type") != expected:
+        raise MalformedMessage(expected, f"type must be {expected!r}")
+
+
 def parse_hello_device(msg: dict[str, Any]) -> HelloDevice:
     """Parsa un messaggio hello dal device.
 
@@ -94,6 +105,7 @@ def parse_hello_device(msg: dict[str, Any]) -> HelloDevice:
     audio_params{format,sample_rate,channels,frame_duration}
     Campi opzionali: features{aec,glyph_push}, text_font
     """
+    _expect_type(msg, "hello")
     version = _required_int(msg, "version", "hello")
 
     transport = msg.get("transport")
@@ -159,6 +171,7 @@ def parse_listen(msg: dict[str, Any]) -> Listen:
     Campi obbligatori: session_id, type, state
     Campi opzionali: mode, text
     """
+    _expect_type(msg, "listen")
     session_id = _required_string(msg, "session_id", "listen")
     state = _required_string(msg, "state", "listen")
     if state not in ("start", "stop", "detect"):
@@ -188,6 +201,7 @@ def parse_abort(msg: dict[str, Any]) -> Abort:
     Campi obbligatori: session_id, type
     Campi opzionali: reason
     """
+    _expect_type(msg, "abort")
     session_id = _required_string(msg, "session_id", "abort")
     reason = msg.get("reason")
     if reason is not None and not isinstance(reason, str):
@@ -200,14 +214,34 @@ def parse_mcp(msg: dict[str, Any]) -> dict[str, Any]:
 
     Restituisce il payload JSON-RPC 2.0.
     """
+    _expect_type(msg, "mcp")
     _required_string(msg, "session_id", "mcp")
     payload = msg.get("payload")
     if not isinstance(payload, dict):
         raise MalformedMessage("mcp", "payload must be a JSON object")
     if payload.get("jsonrpc") != "2.0":
         raise MalformedMessage("mcp", "payload.jsonrpc must be '2.0'")
-    if not any(key in payload for key in ("method", "result", "error")):
+    has_method = "method" in payload
+    has_result = "result" in payload
+    has_error = "error" in payload
+    if has_result and has_error or not any((has_method, has_result, has_error)):
         raise MalformedMessage("mcp", "payload must contain method, result, or error")
+    if has_method:
+        if not isinstance(payload["method"], str) or not payload["method"]:
+            raise MalformedMessage("mcp", "method must be a non-empty string")
+        params = payload.get("params")
+        if params is not None and not isinstance(params, dict):
+            raise MalformedMessage("mcp", "params must be an object")
+        if not payload["method"].startswith("notifications"):
+            request_id = payload.get("id")
+            if isinstance(request_id, bool) or not isinstance(request_id, (int, float)):
+                raise MalformedMessage("mcp", "request id must be numeric")
+    elif "id" not in payload:
+        raise MalformedMessage("mcp", "response must contain id")
+    if has_result and not isinstance(payload["result"], (dict, list, str, int, float, bool, type(None))):
+        raise MalformedMessage("mcp", "result must be JSON data")
+    if has_error and not isinstance(payload["error"], dict):
+        raise MalformedMessage("mcp", "error must be an object")
     return payload
 
 
@@ -216,6 +250,7 @@ def parse_iot(msg: dict[str, Any]) -> tuple[list[dict[str, Any]] | None, list[di
 
     Restituisce (descriptors, states).
     """
+    _expect_type(msg, "iot")
     _required_string(msg, "session_id", "iot")
     descriptors = msg.get("descriptors")
     states = msg.get("states")
@@ -228,6 +263,71 @@ def parse_iot(msg: dict[str, Any]) -> tuple[list[dict[str, Any]] | None, list[di
     if states is not None and any(not isinstance(item, dict) for item in states):
         raise MalformedMessage("iot", "states items must be objects")
     return descriptors, states
+
+
+def parse_hello_server(msg: dict[str, Any]) -> HelloServer:
+    _expect_type(msg, "hello")
+    if msg.get("transport") != "websocket":
+        raise MalformedMessage("hello", "transport must be 'websocket'")
+    session_id = _required_string(msg, "session_id", "hello")
+    audio_params = msg.get("audio_params")
+    if not isinstance(audio_params, dict):
+        raise MalformedMessage("hello", "audio_params is required")
+    return HelloServer(
+        session_id=session_id,
+        audio_params=AudioParams(
+            format=_required_string(audio_params, "format", "hello.audio_params"),
+            sample_rate=_required_int(audio_params, "sample_rate", "hello.audio_params"),
+            channels=_required_int(audio_params, "channels", "hello.audio_params"),
+            frame_duration=_required_int(audio_params, "frame_duration", "hello.audio_params"),
+        ),
+    )
+
+
+def parse_stt(msg: dict[str, Any]) -> STTMessage:
+    _expect_type(msg, "stt")
+    return STTMessage(
+        session_id=_required_string(msg, "session_id", "stt"),
+        text=_required_string(msg, "text", "stt"),
+    )
+
+
+def parse_tts(msg: dict[str, Any]) -> TTSMessage:
+    _expect_type(msg, "tts")
+    state = _required_string(msg, "state", "tts")
+    if state not in ("start", "stop", "sentence_start"):
+        raise MalformedMessage("tts", f"invalid state: {state!r}")
+    text = msg.get("text")
+    if state == "sentence_start" and (not isinstance(text, str) or not text):
+        raise MalformedMessage("tts", "text is required for sentence_start")
+    if text is not None and not isinstance(text, str):
+        raise MalformedMessage("tts", "text must be a string")
+    return TTSMessage(session_id=_required_string(msg, "session_id", "tts"), state=state, text=text)
+
+
+def parse_llm(msg: dict[str, Any]) -> LLMMessage:
+    _expect_type(msg, "llm")
+    session_id = _required_string(msg, "session_id", "llm")
+    emotion = msg.get("emotion")
+    text = msg.get("text")
+    if emotion is not None and not isinstance(emotion, str):
+        raise MalformedMessage("llm", "emotion must be a string")
+    if text is not None and not isinstance(text, str):
+        raise MalformedMessage("llm", "text must be a string")
+    return LLMMessage(session_id=session_id, emotion=emotion, text=text)
+
+
+def parse_ping(msg: dict[str, Any]) -> PingMessage:
+    _expect_type(msg, "ping")
+    return PingMessage()
+
+
+def parse_pong(msg: dict[str, Any]) -> PongMessage:
+    _expect_type(msg, "pong")
+    timestamp = msg.get("timestamp")
+    if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float, str)):
+        raise MalformedMessage("pong", "timestamp must be numeric or string")
+    return PongMessage(timestamp=timestamp)
 
 
 # ── Serializzazione (server → device) ────────────────────────────────────────
