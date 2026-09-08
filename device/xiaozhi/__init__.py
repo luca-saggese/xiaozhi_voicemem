@@ -22,7 +22,7 @@ from device.xiaozhi.commands import (
   SendTTSStart,
   SendTTSStop,
 )
-from device.xiaozhi.connection import DeviceConnection
+from device.xiaozhi.connection import DeviceConnection, DeviceSession, SessionHeaders
 from device.xiaozhi.errors import (
   AuthenticationError,
   HelloTimeout,
@@ -41,6 +41,8 @@ __all__ = [
     "__version__",
     "XiaozhiWebSocketServer",
     "DeviceConnection",
+    "DeviceSession",
+    "SessionHeaders",
     "ProtocolSession",
     "BinaryFrame",
     "BinaryFramingVersion",

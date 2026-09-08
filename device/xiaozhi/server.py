@@ -49,6 +49,7 @@ class XiaozhiWebSocketServer:
         auth_token: str | None = None,
         hello_timeout_s: float | None = None,
         idle_timeout_s: float | None = None,
+        server_audio_params: dict[str, Any] | None = None,
     ):
         self.host = host
         self.port = port
@@ -57,6 +58,7 @@ class XiaozhiWebSocketServer:
         self._auth_token = auth_token
         self._hello_timeout_s = hello_timeout_s
         self._idle_timeout_s = idle_timeout_s
+        self._server_audio_params = server_audio_params
         self._server: WebSocketServer | None = None
         self._http_runner: web.AppRunner | None = None
         self._http_site: web.TCPSite | None = None
@@ -71,6 +73,8 @@ class XiaozhiWebSocketServer:
             process_request=self._http_response,
             ping_interval=None,  # Il firmware gestisce il ping a livello protocollo
         )
+        if self.port == 0 and self._server.sockets:
+            self.port = int(self._server.sockets[0].getsockname()[1])
         app = web.Application()
         app.router.add_route("*", OTA_PATH, self._ota_http_handler)
         self._http_runner = web.AppRunner(app)
@@ -140,7 +144,7 @@ class XiaozhiWebSocketServer:
                 body,
             )
 
-        if path != WEBSOCKET_PATH and not path.startswith(WEBSOCKET_PATH):
+        if path.split("?", 1)[0] != WEBSOCKET_PATH:
             return (http.HTTPStatus.NOT_FOUND, Headers([("Content-Type", "text/plain")]), b"Not Found")
         return None  # Prosegui con l'upgrade WebSocket
 
@@ -215,6 +219,8 @@ class XiaozhiWebSocketServer:
             "client_id": client_id,
             "protocol_version": protocol_version,
             "event_callback": self._event_callback,
+            "authorization": auth_header,
+            "server_audio_params": self._server_audio_params,
         }
         if self._hello_timeout_s is not None:
             conn_kwargs["hello_timeout_s"] = self._hello_timeout_s

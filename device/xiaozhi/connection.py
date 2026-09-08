@@ -15,20 +15,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import struct
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from websockets.exceptions import ConnectionClosed
 from websockets.legacy.server import WebSocketServerProtocol
 
+from device.xiaozhi.codec import BinaryFramingVersion, MalformedFrame, decode_frame
+from device.xiaozhi.commands import (
+    SendHello,
+    SendIoT,
+    SendLLMState,
+    SendMCP,
+    SendPong,
+    SendTranscript,
+    SendTTSSentence,
+    SendTTSStart,
+    SendTTSStop,
+)
 from device.xiaozhi.errors import (
     InvalidStateTransition,
     MalformedMessage,
     ProtocolError,
     ProtocolVersionError,
+    SessionIdMismatch,
     UnknownMessageType,
 )
 from device.xiaozhi.handlers.abort import AbortHandler
@@ -38,6 +51,7 @@ from device.xiaozhi.handlers.listen import ListenHandler
 from device.xiaozhi.handlers.mcp import MCPHandler
 from device.xiaozhi.messages import (
     AudioFrameReceived,
+    AudioParams,
     DeviceDisconnected,
 )
 from device.xiaozhi.protocol import (
@@ -50,7 +64,14 @@ from device.xiaozhi.protocol import (
     parse_message,
     serialize_error,
     serialize_hello_server,
+    serialize_iot,
+    serialize_llm,
+    serialize_mcp,
     serialize_pong,
+    serialize_stt,
+    serialize_tts_sentence,
+    serialize_tts_start,
+    serialize_tts_stop,
 )
 from device.xiaozhi.state import (
     SessionState,
@@ -63,10 +84,21 @@ logger = logging.getLogger("xiaozhi_voicemem.device.xiaozhi.connection")
 HELLO_TIMEOUT_S = 10.0
 #: Timeout idle connessione (nessun messaggio per questo tempo).
 IDLE_TIMEOUT_S = 120.0
+_EVENT_END = object()
+
+
+@dataclass(frozen=True)
+class SessionHeaders:
+    """Header WebSocket conservati per la durata della sessione."""
+
+    authorization: str
+    protocol_version: str
+    device_id: str
+    client_id: str
 
 
 class DeviceConnection:
-    """Gestisce una singola connessione WebSocket con un device Xiaozhi."""
+    """Sessione WebSocket Xiaozhi e bridge tra transport ed eventi runtime."""
 
     def __init__(
         self,
@@ -78,6 +110,8 @@ class DeviceConnection:
         event_callback: Callable[[Any], None] | None = None,
         hello_timeout_s: float = HELLO_TIMEOUT_S,
         idle_timeout_s: float = IDLE_TIMEOUT_S,
+        authorization: str = "",
+        server_audio_params: dict[str, Any] | None = None,
     ):
         self.websocket = websocket
         self.device_id = device_id
@@ -88,6 +122,23 @@ class DeviceConnection:
         self._event_callback = event_callback
         self.hello_timeout_s = hello_timeout_s
         self.idle_timeout_s = idle_timeout_s
+        self.headers = SessionHeaders(
+            authorization=authorization,
+            protocol_version=str(protocol_version),
+            device_id=device_id,
+            client_id=client_id,
+        )
+        self.auth_info = {"authorization": authorization}
+        self.server_audio_params = server_audio_params or {
+            "format": "opus",
+            "sample_rate": 24000,
+            "channels": 1,
+            "frame_duration": 60,
+        }
+        self.connected_at = time.time()
+        self.last_activity_at = self.connected_at
+        self._events: asyncio.Queue[Any] = asyncio.Queue()
+        self._send_lock = asyncio.Lock()
 
         # Parametri negoziati (popolati dopo hello)
         self.audio_params: dict[str, Any] = {}
@@ -130,6 +181,7 @@ class DeviceConnection:
             # Reader loop principale (legge frame finché la connessione è aperta)
             async for raw in self.websocket:
                 self._last_message_ts = time.monotonic()
+                self.last_activity_at = time.time()
 
                 if isinstance(raw, bytes):
                     await self._handle_binary(raw)
@@ -214,7 +266,9 @@ class DeviceConnection:
             await self._send_error("MALFORMED", str(e))
         except ProtocolError as e:
             logger.error("Protocol error: %s", e)
-            if not e.recoverable:
+            if e.recoverable:
+                await self._send_error(e.code, str(e))
+            else:
                 await self.close(str(e))
 
     async def _handle_binary(self, data: bytes) -> None:
@@ -222,44 +276,21 @@ class DeviceConnection:
 
         In M02 registriamo solo il dato grezzo. Il decoding PCM sarà in M03.
         """
+        if self.state is not SessionState.HELLO_DONE:
+            raise InvalidStateTransition(self.state.name, "AUDIO", self.session_id)
         self._bytes_received += len(data)
         try:
-            payload, timestamp = self._decode_audio_frame(data)
-        except MalformedMessage as error:
+            frame = decode_frame(data, BinaryFramingVersion(self.protocol_version))
+        except (MalformedFrame, ValueError) as error:
             logger.warning("Malformed binary message: %s", error)
             await self._send_error("MALFORMED_BINARY", str(error))
             return
         self._emit_event(AudioFrameReceived(
             session_id=self.session_id,
             device_id=self.device_id,
-            opus_data=payload,
-            timestamp=timestamp,
+            opus_data=frame.payload,
+            timestamp=frame.timestamp or None,
         ))
-
-    def _decode_audio_frame(self, data: bytes) -> tuple[bytes, int | None]:
-        if self.protocol_version == 1:
-            return data, None
-        if self.protocol_version == 2:
-            if len(data) < 16:
-                raise MalformedMessage("binary", "version 2 header is truncated")
-            version, frame_type, _reserved, timestamp, payload_size = struct.unpack(">HHIII", data[:16])
-            if version != 2 or frame_type != 0:
-                raise MalformedMessage("binary", "invalid version 2 audio header")
-            payload = data[16:]
-            if len(payload) != payload_size:
-                raise MalformedMessage("binary", "version 2 payload size mismatch")
-            return payload, timestamp
-        if self.protocol_version == 3:
-            if len(data) < 4:
-                raise MalformedMessage("binary", "version 3 header is truncated")
-            frame_type, _reserved, payload_size = struct.unpack(">BBH", data[:4])
-            if frame_type != 0:
-                raise MalformedMessage("binary", "invalid version 3 audio header")
-            payload = data[4:]
-            if len(payload) != payload_size:
-                raise MalformedMessage("binary", "version 3 payload size mismatch")
-            return payload, None
-        raise ProtocolVersionError(self.protocol_version, [1, 2, 3])
 
     async def _handle_hello(self, msg: dict[str, Any]) -> None:
         """Gestisce il primo messaggio hello dal device."""
@@ -292,6 +323,7 @@ class DeviceConnection:
         response = serialize_hello_server(
             session_id=self.session_id,
             transport="websocket",
+            audio_params=self._audio_params_model(self.server_audio_params),
         )
         await self.websocket.send(response)
 
@@ -323,7 +355,62 @@ class DeviceConnection:
         if not isinstance(session_id, str) or not session_id:
             raise MalformedMessage("session", "session_id must be a non-empty string")
         if session_id != self.session_id:
-            raise MalformedMessage("session", "session_id does not match this connection")
+            raise SessionIdMismatch(self.session_id, session_id)
+
+    async def send(self, command: Any) -> None:
+        """Serializza e invia un comando server-side sul WebSocket."""
+
+        if self.state is not SessionState.HELLO_DONE and not isinstance(command, SendHello):
+            raise InvalidStateTransition(self.state.name, "SEND", self.session_id)
+        command_session_id = getattr(command, "session_id", self.session_id)
+        if command_session_id != self.session_id:
+            raise SessionIdMismatch(self.session_id, str(command_session_id))
+
+        if isinstance(command, SendHello):
+            payload = serialize_hello_server(
+                self.session_id,
+                transport="websocket",
+                audio_params=self._audio_params_model(self.server_audio_params),
+            )
+        elif isinstance(command, SendTranscript):
+            payload = serialize_stt(self.session_id, command.text)
+        elif isinstance(command, SendTTSStart):
+            payload = serialize_tts_start(self.session_id)
+        elif isinstance(command, SendTTSSentence):
+            payload = serialize_tts_sentence(self.session_id, command.text)
+        elif isinstance(command, SendTTSStop):
+            payload = serialize_tts_stop(self.session_id)
+        elif isinstance(command, SendLLMState):
+            payload = serialize_llm(self.session_id, command.text or "", command.emotion or "")
+        elif isinstance(command, SendMCP):
+            payload = serialize_mcp(self.session_id, command.payload)
+        elif isinstance(command, SendIoT):
+            payload = serialize_iot(self.session_id, command.payload)
+        elif isinstance(command, SendPong):
+            payload = serialize_pong(str(command.timestamp))
+        else:
+            raise TypeError(f"unsupported Xiaozhi command: {type(command).__name__}")
+
+        async with self._send_lock:
+            await self.websocket.send(payload)
+
+    @staticmethod
+    def _audio_params_model(params: dict[str, Any]) -> AudioParams:
+        return AudioParams(
+            format=str(params.get("format", "opus")),
+            sample_rate=int(params.get("sample_rate", 24000)),
+            channels=int(params.get("channels", 1)),
+            frame_duration=int(params.get("frame_duration", 60)),
+        )
+
+    async def events(self):
+        """Itera sugli eventi fino alla disconnessione della sessione."""
+
+        while True:
+            event = await self._events.get()
+            if event is _EVENT_END:
+                return
+            yield event
 
     async def _route_message(self, msg_type: str, parsed: Any) -> None:
         """Inoltra un messaggio all'handler appropriato."""
@@ -391,6 +478,7 @@ class DeviceConnection:
 
     def _emit_event(self, event: Any) -> None:
         """Emetti un evento verso il runtime (se callback configurato)."""
+        self._events.put_nowait(event)
         if self._event_callback:
             try:
                 self._event_callback(event)
@@ -414,6 +502,10 @@ class DeviceConnection:
 
         self._hello_task = None
         self._idle_task = None
+        self._events.put_nowait(_EVENT_END)
         self._cleanup_done.set()
 
         logger.info("Connection cleaned up: device=%s session=%s", self.device_id, self.session_id)
+
+# Nome semantico del contratto runtime; DeviceConnection resta l'API legacy.
+DeviceSession = DeviceConnection
