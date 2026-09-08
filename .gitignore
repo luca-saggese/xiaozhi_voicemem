@@ -1,2 +1,29 @@
 # Repository upstream acquisiti come riferimento (non versionati nel progetto)
 _upstream/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Test / tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Storage memoria VoiceMem (runtime)
+voicemem_memoryspace/
+*.sqlite
+*.sqlite3
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
