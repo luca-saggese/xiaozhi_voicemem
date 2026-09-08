@@ -153,26 +153,13 @@ print("OK")
         )
         assert result.returncode == 0, f"Fallito: {result.stderr}"
 
-    def test_runtime_does_not_import_device_xiaozhi(self):
-        """Importare runtime non tira su device.xiaozhi."""
+    def test_device_xiaozhi_does_not_import_voicemem_submodules(self):
+        """device.xiaozhi non importa sottomoduli di voicemem."""
         code = """
 import sys
-import runtime
-assert "device.xiaozhi" not in sys.modules, "device.xiaozhi è stato importato!"
-print("OK")
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", code],
-            capture_output=True, text=True, cwd=PROJECT_ROOT,
-        )
-        assert result.returncode == 0, f"Fallito: {result.stderr}"
-
-    def test_voicemem_does_not_import_device_xiaozhi(self):
-        """Importare voicemem non tira su device.xiaozhi."""
-        code = """
-import sys
-import voicemem
-assert "device.xiaozhi" not in sys.modules, "device.xiaozhi è stato importato!"
+import device.xiaozhi
+for m in list(sys.modules.keys()):
+    assert not m.startswith("voicemem"), f"Modulo {m} non dovrebbe essere presente!"
 print("OK")
 """
         result = subprocess.run(

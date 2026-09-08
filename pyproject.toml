@@ -26,12 +26,15 @@ classifiers = [
 # successive (M04+).
 dependencies = [
     "numpy",
+    "websockets>=11",
+    "aiohttp>=3.9",
 ]
 
 [project.optional-dependencies]
 # Dipendenze per lo sviluppo (test, lint, format, type check).
 dev = [
     "pytest>=7",
+    "pytest-asyncio>=0.23",
     "ruff>=0.4",
     "mypy>=1.8",
 ]

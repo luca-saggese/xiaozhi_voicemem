@@ -1,0 +1,11 @@
+{
+  "websocket": {
+    "url": "ws://192.168.1.100:8765/xiaozhi/v1/",
+    "token": "",
+    "version": 1
+  },
+  "server_time": {
+    "timestamp": 1788888000000,
+    "timezone_offset": 0
+  }
+}
